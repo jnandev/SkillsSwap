@@ -1,149 +1,152 @@
 # SkillSwap
 
-Premium-style SkillSwap mobile/web experience built with Expo + React Native and a local Express backend.
+SkillSwap is a premium-style mentoring and peer-learning app built with Expo, React Native, TypeScript, and an Express API.
 
 ## Features
 
-- Auth flow: register, login, persisted session token
-- Mandatory profile onboarding + editable profile tab
-- Discover teachers/learners with search, category/persona filters
-- Connect + favorite listings
-- Live session booking modal with lifecycle states (`upcoming`, `live`, `completed`)
-- Calendar export (`.ics`) per session
-- Community events and join actions
-- Notifications center
-- Message threads with replies
-- Learning plan progress tracking
-- Real-time polling (messages/notifications/threads refresh every 10s)
+- Register and login with persisted auth
+- Profile onboarding and profile editing
+- Discover mentors and learners with search and filters
+- Connect, save, and book member sessions
+- Session status management and calendar export
+- Community events, notifications, and message threads
+- Learning progress tracking
+- Mobile web deployment on Vercel
+- Expo development build support for Android and iOS
 
-## Tech Stack
+## Stack
 
 - Frontend: Expo, React Native, TypeScript
-- Backend: Node.js, Express, JSON file persistence
+- Backend: Node.js, Express
+- Persistence: seeded JSON data
+- Hosting: Vercel
+- Native build tooling: EAS Build
 
 ## Prerequisites
 
-- Node.js 18+ (LTS recommended)
+- Node.js 18+
 - npm
+- Expo account for EAS builds
+- Android phone or Android emulator for Android dev builds
 
 ## Install
 
 ```bash
+cd /Users/dev/Desktop/SkillsSwap
 npm install
 ```
 
-## Quick Start (All Platforms)
+## Local Development
 
-Open **two terminals** in the project folder.
-
-### Terminal 1: Backend API
+Run the backend in one terminal:
 
 ```bash
 npm run backend
 ```
 
-Backend runs at `http://localhost:4000`.
-
-### Terminal 2: Expo App
+Run the Expo app in another terminal:
 
 ```bash
 npm start
 ```
 
-From Expo terminal:
+Backend URL:
+- `http://localhost:4000`
 
-- Press `a` to launch Android emulator
-- Press `i` to launch iOS simulator (macOS only)
-- Scan QR with Expo Go (physical device)
+Expo shortcuts:
+- `a` opens Android
+- `i` opens iOS simulator if full Xcode is installed
+- `w` opens web
 
-## Windows: Full Mobile Setup
+## Web
 
-### 1) Install required tools
+Start the web app locally:
 
-- Install Node.js LTS: [https://nodejs.org](https://nodejs.org)
-- Install Git: [https://git-scm.com](https://git-scm.com)
-- Install Android Studio: [https://developer.android.com/studio](https://developer.android.com/studio)
-- Install Expo Go on your Android phone from Play Store (optional, for physical device testing)
+```bash
+npm run web
+```
 
-### 2) Setup Android Studio emulator
+Production app:
+- [https://skills-swap-kappa.vercel.app](https://skills-swap-kappa.vercel.app)
 
-- Open Android Studio
-- Go to **More Actions > Virtual Device Manager**
-- Create a virtual device (for example Pixel 6)
-- Download a system image (recommended latest stable API)
-- Start the emulator once to verify it boots
+## Android Development Build
 
-### 3) Configure environment variables (Windows)
+This project is already configured for EAS Android development builds.
 
-Add these to **System Environment Variables**:
+Relevant config:
+- [app.json](/Users/dev/Desktop/SkillsSwap/app.json)
+- [eas.json](/Users/dev/Desktop/SkillsSwap/eas.json)
 
-- `ANDROID_HOME` = `C:\Users\<YourUser>\AppData\Local\Android\Sdk`
-- Add to `Path`:
-  - `%ANDROID_HOME%\platform-tools`
-  - `%ANDROID_HOME%\emulator`
+### 1. Log in to Expo
 
-Restart terminal after updating environment variables.
+```bash
+npx eas-cli login
+```
 
-### 4) Run SkillSwap on Windows
+### 2. Start an Android development build
 
-In project folder, open two terminals:
+```bash
+npx eas-cli build --platform android --profile development
+```
 
-Terminal 1:
+### 3. Install the build on Android
+
+When the build finishes, EAS gives you an install link or APK download page. Open that link on your Android phone and install the app.
+
+### 4. Start Metro for the dev client
+
+After the app is installed:
 
 ```bash
 npm run backend
 ```
 
-Terminal 2:
+In another terminal:
 
 ```bash
-npm start
+npm run start:dev-client
 ```
 
-Then:
+Then open the installed SkillSwap development build on the Android phone.
 
-- Press `a` in Expo terminal to open Android emulator app
-- Or scan QR from Expo terminal in Expo Go on phone (same Wi-Fi network)
+## iOS Notes
 
-## macOS Mobile Setup (if needed)
-
-- iOS Simulator requires Xcode installed from App Store
-- Start backend: `npm run backend`
-- Start Expo: `npm start`
-- Press `i` for iOS simulator or `a` for Android emulator
-
-## Run Web Version
-
-```bash
-npx expo start --web --port 8085
-```
-
-Open: `http://localhost:8085`
+- Expo Go was not reliable for this project because of SDK compatibility on the test device.
+- iOS development builds require Apple Developer access.
+- If Apple blocks the account, use Android development builds or install full Xcode and run the iOS simulator locally.
 
 ## Demo Login
 
 - Email: `demo@skillsswap.app`
 - Password: `demo123`
 
-## Type Check
+## Scripts
+
+- `npm start` starts Expo
+- `npm run start:dev-client` starts Expo for a development build
+- `npm run backend` starts the Express backend
+- `npm run web` starts Expo web
+- `npm run android` starts Expo Android flow
+- `npm run ios` starts Expo iOS flow
+- `npm run build:web` exports the web build
+
+## Verification
+
+Type check:
 
 ```bash
 npx tsc --noEmit
 ```
 
-## Project Scripts
+Web build:
 
-- `npm run backend` - starts Express backend
-- `npm run web` - starts Expo web (default port behavior)
-- `npm start` - starts Expo dev server
-- `npm run ios` - starts Expo for iOS
-- `npm run android` - starts Expo for Android
+```bash
+npm run build:web
+```
 
 ## Troubleshooting
 
-- If Expo asks for another port, accept it or run:
-  - `npx expo start --port 8086`
-- If backend is not reachable, verify `npm run backend` is still running
-- If emulator is not detected on Windows:
-  - start emulator manually from Android Studio first
-  - then press `a` in Expo terminal
+- If Expo prompts for a different port, accept it.
+- If the backend is unreachable, make sure `npm run backend` is still running.
+- If Android install is blocked, confirm the EAS build finished successfully and use the generated build page link.
+- If iOS simulator commands fail on macOS, full Xcode is not active yet. Run Xcode once and switch the active developer directory if needed.
