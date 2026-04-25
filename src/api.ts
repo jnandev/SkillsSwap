@@ -14,12 +14,13 @@ import type {
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+const PRODUCTION_API_BASE = 'https://skills-swap-kappa.vercel.app/api';
 const configuredApiBase =
   process.env.EXPO_PUBLIC_API_BASE ||
   Constants.expoConfig?.extra?.apiBase ||
   '';
 const isWeb = Platform.OS === 'web';
-const API_BASE = isWeb ? '/api' : configuredApiBase || 'http://localhost:4000/api';
+const API_BASE = isWeb ? '/api' : configuredApiBase || PRODUCTION_API_BASE;
 let authToken = '';
 
 export const setAuthToken = (token: string) => {

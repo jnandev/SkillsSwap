@@ -36,6 +36,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
+      "apiBase": "https://skills-swap-kappa.vercel.app/api",
       "eas": {
         "projectId": "66691d8a-7f17-4fab-8261-5128c84b5d03"
       }
