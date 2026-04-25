@@ -18,7 +18,7 @@ SkillSwap is a premium-style mentoring and peer-learning app built with Expo, Re
 
 - Frontend: Expo, React Native, TypeScript
 - Backend: Node.js, Express
-- Persistence: seeded JSON data
+- Persistence: libSQL/Turso-ready database layer with local file fallback
 - Hosting: Vercel
 - Native build tooling: EAS Build
 
@@ -36,6 +36,8 @@ cd /Users/dev/Desktop/SkillsSwap
 npm install
 ```
 
+The root install now also installs `backend/` dependencies automatically.
+
 ## Local Development
 
 Run the backend in one terminal:
@@ -52,6 +54,11 @@ npm start
 
 Backend URL:
 - `http://localhost:4000`
+
+Environment:
+- Copy [.env.example](/Users/dev/Desktop/SkillsSwap/.env.example) to `.env`
+- For local-only fallback, you can omit Turso credentials and the backend will use a local file database
+- For hosted persistence, set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`
 
 Expo shortcuts:
 - `a` opens Android

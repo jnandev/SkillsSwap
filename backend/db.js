@@ -1,127 +1,18 @@
 const fs = require('fs');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { DatabaseSync } = require('node:sqlite');
+const { createClient } = require('@libsql/client');
 const {
-  DATABASE_PATH,
+  DATABASE_URL,
+  DATABASE_AUTH_TOKEN,
   SEED_DATA_FILE,
 } = require('./config');
 
 const seed = JSON.parse(fs.readFileSync(SEED_DATA_FILE, 'utf8'));
-const db = new DatabaseSync(DATABASE_PATH);
-
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA foreign_keys = ON;');
-
-const runMigrations = () => {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      headline TEXT NOT NULL DEFAULT '',
-      bio TEXT NOT NULL DEFAULT '',
-      country TEXT NOT NULL DEFAULT '',
-      skills_offered TEXT NOT NULL DEFAULT '[]',
-      skills_to_learn TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS categories (
-      name TEXT PRIMARY KEY
-    );
-
-    CREATE TABLE IF NOT EXISTS discovery_cards (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      persona TEXT NOT NULL,
-      title TEXT NOT NULL,
-      skill TEXT NOT NULL,
-      category TEXT NOT NULL,
-      country TEXT NOT NULL,
-      rating REAL NOT NULL,
-      bio TEXT NOT NULL,
-      next_session_slots TEXT NOT NULL DEFAULT '[]'
-    );
-
-    CREATE TABLE IF NOT EXISTS user_card_state (
-      user_id TEXT NOT NULL,
-      card_id TEXT NOT NULL,
-      connected INTEGER NOT NULL DEFAULT 0,
-      favorited INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (user_id, card_id),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (card_id) REFERENCES discovery_cards(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      card_id TEXT NOT NULL,
-      with_name TEXT NOT NULL,
-      skill TEXT NOT NULL,
-      time TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      calendar_url TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS events (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      base_participants INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS user_event_state (
-      user_id TEXT NOT NULL,
-      event_id TEXT NOT NULL,
-      joined_at TEXT NOT NULL,
-      PRIMARY KEY (user_id, event_id),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS learning_plans (
-      user_id TEXT PRIMARY KEY,
-      profile_completed INTEGER NOT NULL DEFAULT 0,
-      first_session_booked INTEGER NOT NULL DEFAULT 0,
-      challenge_joined INTEGER NOT NULL DEFAULT 0,
-      skills_target INTEGER NOT NULL DEFAULT 4,
-      skills_completed INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS messages (
-      user_id TEXT PRIMARY KEY,
-      unread_count INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS notifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      read INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS message_threads (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      participant TEXT NOT NULL,
-      topic TEXT NOT NULL,
-      unread INTEGER NOT NULL DEFAULT 0,
-      last_message TEXT NOT NULL,
-      last_at TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-  `);
-};
+const client = createClient({
+  url: DATABASE_URL,
+  authToken: DATABASE_AUTH_TOKEN || undefined,
+});
 
 const parseList = (value) => {
   try {
@@ -134,6 +25,9 @@ const parseList = (value) => {
 const boolInt = (value) => (value ? 1 : 0);
 const nowIso = () => new Date().toISOString();
 const newId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
+
+const rowValue = (row, key) => row[key];
+const rowCount = (row, key = 'count') => Number(rowValue(row, key) || 0);
 
 const sanitizeUserRow = (row) => {
   if (!row) {
@@ -220,95 +114,205 @@ const profileCompleted = (user) =>
       user.skillsToLearn.length
   );
 
-const ensureUserState = (userId, overrides = {}) => {
-  db.prepare(
+const execute = async (sql, args = []) => client.execute({ sql, args });
+
+const getRow = async (sql, args = []) => {
+  const result = await execute(sql, args);
+  return result.rows[0] || null;
+};
+
+const getAll = async (sql, args = []) => {
+  const result = await execute(sql, args);
+  return result.rows;
+};
+
+const runMigrations = async () => {
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      headline TEXT NOT NULL DEFAULT '',
+      bio TEXT NOT NULL DEFAULT '',
+      country TEXT NOT NULL DEFAULT '',
+      skills_offered TEXT NOT NULL DEFAULT '[]',
+      skills_to_learn TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS categories (
+      name TEXT PRIMARY KEY
+    )`,
+    `CREATE TABLE IF NOT EXISTS discovery_cards (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      persona TEXT NOT NULL,
+      title TEXT NOT NULL,
+      skill TEXT NOT NULL,
+      category TEXT NOT NULL,
+      country TEXT NOT NULL,
+      rating REAL NOT NULL,
+      bio TEXT NOT NULL,
+      next_session_slots TEXT NOT NULL DEFAULT '[]'
+    )`,
+    `CREATE TABLE IF NOT EXISTS user_card_state (
+      user_id TEXT NOT NULL,
+      card_id TEXT NOT NULL,
+      connected INTEGER NOT NULL DEFAULT 0,
+      favorited INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, card_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      card_id TEXT NOT NULL,
+      with_name TEXT NOT NULL,
+      skill TEXT NOT NULL,
+      time TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      calendar_url TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      base_participants INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS user_event_state (
+      user_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      joined_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, event_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS learning_plans (
+      user_id TEXT PRIMARY KEY,
+      profile_completed INTEGER NOT NULL DEFAULT 0,
+      first_session_booked INTEGER NOT NULL DEFAULT 0,
+      challenge_joined INTEGER NOT NULL DEFAULT 0,
+      skills_target INTEGER NOT NULL DEFAULT 4,
+      skills_completed INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS messages (
+      user_id TEXT PRIMARY KEY,
+      unread_count INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      read INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS message_threads (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      participant TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      unread INTEGER NOT NULL DEFAULT 0,
+      last_message TEXT NOT NULL,
+      last_at TEXT NOT NULL
+    )`,
+  ];
+
+  for (const sql of statements) {
+    await execute(sql);
+  }
+};
+
+const ensureUserState = async (userId, overrides = {}) => {
+  await execute(
     `INSERT OR IGNORE INTO learning_plans (
       user_id, profile_completed, first_session_booked, challenge_joined, skills_target, skills_completed
-    ) VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    userId,
-    boolInt(overrides.profileCompleted),
-    boolInt(overrides.firstSessionBooked),
-    boolInt(overrides.challengeJoined),
-    overrides.skillsTarget ?? 4,
-    overrides.skillsCompleted ?? 0
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      boolInt(overrides.profileCompleted),
+      boolInt(overrides.firstSessionBooked),
+      boolInt(overrides.challengeJoined),
+      overrides.skillsTarget ?? 4,
+      overrides.skillsCompleted ?? 0,
+    ]
   );
 
-  db.prepare(
-    'INSERT OR IGNORE INTO messages (user_id, unread_count) VALUES (?, ?)'
-  ).run(userId, overrides.unreadCount ?? 0);
+  await execute(
+    'INSERT OR IGNORE INTO messages (user_id, unread_count) VALUES (?, ?)',
+    [userId, overrides.unreadCount ?? 0]
+  );
 };
 
-const pushNotification = (userId, title, detail) => {
-  db.prepare(
+const pushNotification = async (userId, title, detail) => {
+  await execute(
     `INSERT INTO notifications (id, user_id, title, detail, created_at, read)
-     VALUES (?, ?, ?, ?, ?, 0)`
-  ).run(newId('n'), userId, title, detail, nowIso());
+     VALUES (?, ?, ?, ?, ?, 0)`,
+    [newId('n'), userId, title, detail, nowIso()]
+  );
 };
 
-const seedDatabase = () => {
-  const hasUsers = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
-  if (hasUsers > 0) {
+const seedDatabase = async () => {
+  const hasUsers = await getRow('SELECT COUNT(*) AS count FROM users');
+  if (rowCount(hasUsers) > 0) {
     return;
   }
 
-  const insertCategory = db.prepare(
-    'INSERT INTO categories (name) VALUES (?)'
-  );
-  seed.categories.forEach((name) => insertCategory.run(name));
+  for (const name of seed.categories) {
+    await execute('INSERT INTO categories (name) VALUES (?)', [name]);
+  }
 
-  const insertCard = db.prepare(
-    `INSERT INTO discovery_cards (
-      id, name, persona, title, skill, category, country, rating, bio, next_session_slots
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  seed.discoveryCards.forEach((card) => {
-    insertCard.run(
-      card.id,
-      card.name,
-      card.persona,
-      card.title,
-      card.skill,
-      card.category,
-      card.country,
-      card.rating,
-      card.bio,
-      JSON.stringify(card.nextSessionSlots)
+  for (const card of seed.discoveryCards) {
+    await execute(
+      `INSERT INTO discovery_cards (
+        id, name, persona, title, skill, category, country, rating, bio, next_session_slots
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        card.id,
+        card.name,
+        card.persona,
+        card.title,
+        card.skill,
+        card.category,
+        card.country,
+        card.rating,
+        card.bio,
+        JSON.stringify(card.nextSessionSlots),
+      ]
     );
-  });
+  }
 
-  const insertEvent = db.prepare(
-    'INSERT INTO events (id, title, description, base_participants) VALUES (?, ?, ?, ?)'
-  );
-  seed.events.forEach((event) => {
-    insertEvent.run(
-      event.id,
-      event.title,
-      event.description,
-      Math.max(event.participants - (event.joined ? 1 : 0), 0)
+  for (const event of seed.events) {
+    await execute(
+      'INSERT INTO events (id, title, description, base_participants) VALUES (?, ?, ?, ?)',
+      [
+        event.id,
+        event.title,
+        event.description,
+        Math.max(event.participants - (event.joined ? 1 : 0), 0),
+      ]
     );
-  });
+  }
 
   const demoUser = seed.users[0];
   const demoUserId = demoUser.id;
-  db.prepare(
+  await execute(
     `INSERT INTO users (
       id, name, email, password_hash, headline, bio, country, skills_offered, skills_to_learn, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    demoUser.id,
-    demoUser.name,
-    demoUser.email.toLowerCase(),
-    bcrypt.hashSync(demoUser.password, 10),
-    demoUser.headline,
-    demoUser.bio,
-    demoUser.country,
-    JSON.stringify(demoUser.skillsOffered),
-    JSON.stringify(demoUser.skillsToLearn),
-    nowIso()
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      demoUser.id,
+      demoUser.name,
+      demoUser.email.toLowerCase(),
+      bcrypt.hashSync(demoUser.password, 10),
+      demoUser.headline,
+      demoUser.bio,
+      demoUser.country,
+      JSON.stringify(demoUser.skillsOffered),
+      JSON.stringify(demoUser.skillsToLearn),
+      nowIso(),
+    ]
   );
 
-  ensureUserState(demoUserId, {
+  await ensureUserState(demoUserId, {
     profileCompleted: seed.learningPlan.profileCompleted,
     firstSessionBooked: seed.learningPlan.firstSessionBooked,
     challengeJoined: seed.learningPlan.challengeJoined,
@@ -317,108 +321,122 @@ const seedDatabase = () => {
     unreadCount: seed.messages.unreadCount,
   });
 
-  const upsertCardState = db.prepare(
-    `INSERT INTO user_card_state (user_id, card_id, connected, favorited)
-     VALUES (?, ?, ?, ?)`
-  );
-  seed.discoveryCards.forEach((card) => {
+  for (const card of seed.discoveryCards) {
     if (card.connected || card.favorited) {
-      upsertCardState.run(
-        demoUserId,
-        card.id,
-        boolInt(card.connected),
-        boolInt(card.favorited)
+      await execute(
+        `INSERT INTO user_card_state (user_id, card_id, connected, favorited)
+         VALUES (?, ?, ?, ?)`,
+        [
+          demoUserId,
+          card.id,
+          boolInt(card.connected),
+          boolInt(card.favorited),
+        ]
       );
     }
-  });
+  }
 
-  const insertSession = db.prepare(
-    `INSERT INTO sessions (
-      id, user_id, card_id, with_name, skill, time, status, created_at, calendar_url
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  seed.sessions.forEach((session) => {
-    insertSession.run(
-      session.id,
-      demoUserId,
-      session.cardId,
-      session.with,
-      session.skill,
-      session.time,
-      session.status,
-      session.createdAt,
-      session.calendarUrl
+  for (const session of seed.sessions) {
+    await execute(
+      `INSERT INTO sessions (
+        id, user_id, card_id, with_name, skill, time, status, created_at, calendar_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        session.id,
+        demoUserId,
+        session.cardId,
+        session.with,
+        session.skill,
+        session.time,
+        session.status,
+        session.createdAt,
+        session.calendarUrl,
+      ]
     );
-  });
+  }
 
-  const insertEventJoin = db.prepare(
-    'INSERT OR IGNORE INTO user_event_state (user_id, event_id, joined_at) VALUES (?, ?, ?)'
-  );
-  seed.events
-    .filter((event) => event.joined)
-    .forEach((event) => insertEventJoin.run(demoUserId, event.id, nowIso()));
-
-  const insertNotification = db.prepare(
-    `INSERT INTO notifications (id, user_id, title, detail, created_at, read)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  );
-  seed.notifications.forEach((notification) => {
-    insertNotification.run(
-      notification.id,
-      demoUserId,
-      notification.title,
-      notification.detail,
-      notification.createdAt,
-      boolInt(notification.read)
+  for (const event of seed.events.filter((item) => item.joined)) {
+    await execute(
+      'INSERT OR IGNORE INTO user_event_state (user_id, event_id, joined_at) VALUES (?, ?, ?)',
+      [demoUserId, event.id, nowIso()]
     );
-  });
+  }
 
-  const insertThread = db.prepare(
-    `INSERT INTO message_threads (id, user_id, participant, topic, unread, last_message, last_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  seed.messageThreads.forEach((thread) => {
-    insertThread.run(
-      thread.id,
-      demoUserId,
-      thread.participant,
-      thread.topic,
-      thread.unread,
-      thread.lastMessage,
-      thread.lastAt
+  for (const notification of seed.notifications) {
+    await execute(
+      `INSERT INTO notifications (id, user_id, title, detail, created_at, read)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        notification.id,
+        demoUserId,
+        notification.title,
+        notification.detail,
+        notification.createdAt,
+        boolInt(notification.read),
+      ]
     );
-  });
+  }
+
+  for (const thread of seed.messageThreads) {
+    await execute(
+      `INSERT INTO message_threads (id, user_id, participant, topic, unread, last_message, last_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        thread.id,
+        demoUserId,
+        thread.participant,
+        thread.topic,
+        thread.unread,
+        thread.lastMessage,
+        thread.lastAt,
+      ]
+    );
+  }
 };
 
-runMigrations();
-seedDatabase();
+let initPromise;
 
-const createUser = ({ name, email, password }) => {
+const init = async () => {
+  if (!initPromise) {
+    initPromise = (async () => {
+      await runMigrations();
+      await seedDatabase();
+    })();
+  }
+  return initPromise;
+};
+
+const createUser = async ({ name, email, password }) => {
+  await init();
   const id = newId('user');
   const normalizedEmail = String(email).toLowerCase().trim();
   const passwordHash = bcrypt.hashSync(String(password), 10);
 
-  db.prepare(
+  await execute(
     `INSERT INTO users (
       id, name, email, password_hash, headline, bio, country, skills_offered, skills_to_learn, created_at
-    ) VALUES (?, ?, ?, ?, '', '', '', '[]', '[]', ?)`
-  ).run(id, String(name).trim(), normalizedEmail, passwordHash, nowIso());
+    ) VALUES (?, ?, ?, ?, '', '', '', '[]', '[]', ?)`,
+    [id, String(name).trim(), normalizedEmail, passwordHash, nowIso()]
+  );
 
-  ensureUserState(id);
+  await ensureUserState(id);
   return getUserById(id);
 };
 
-const getUserByEmail = (email) =>
-  db.prepare('SELECT * FROM users WHERE email = ?').get(String(email).toLowerCase().trim());
+const getUserByEmail = async (email) =>
+  getRow('SELECT * FROM users WHERE email = ?', [
+    String(email).toLowerCase().trim(),
+  ]);
 
-const getUserById = (userId) =>
-  sanitizeUserRow(db.prepare('SELECT * FROM users WHERE id = ?').get(userId));
+const getUserById = async (userId) =>
+  sanitizeUserRow(await getRow('SELECT * FROM users WHERE id = ?', [userId]));
 
 const verifyPassword = (userRow, password) =>
   Boolean(userRow && bcrypt.compareSync(String(password), userRow.password_hash));
 
-const updateProfile = (userId, updates) => {
-  const current = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+const updateProfile = async (userId, updates) => {
+  await init();
+  const current = await getRow('SELECT * FROM users WHERE id = ?', [userId]);
   if (!current) {
     return null;
   }
@@ -432,73 +450,85 @@ const updateProfile = (userId, updates) => {
     skillsToLearn: updates.skillsToLearn ?? parseList(current.skills_to_learn),
   };
 
-  db.prepare(
+  await execute(
     `UPDATE users
      SET name = ?, headline = ?, bio = ?, country = ?, skills_offered = ?, skills_to_learn = ?
-     WHERE id = ?`
-  ).run(
-    next.name,
-    next.headline,
-    next.bio,
-    next.country,
-    JSON.stringify(next.skillsOffered),
-    JSON.stringify(next.skillsToLearn),
-    userId
+     WHERE id = ?`,
+    [
+      next.name,
+      next.headline,
+      next.bio,
+      next.country,
+      JSON.stringify(next.skillsOffered),
+      JSON.stringify(next.skillsToLearn),
+      userId,
+    ]
   );
 
-  db.prepare(
-    'UPDATE learning_plans SET profile_completed = ? WHERE user_id = ?'
-  ).run(boolInt(profileCompleted(next)), userId);
+  await execute(
+    'UPDATE learning_plans SET profile_completed = ? WHERE user_id = ?',
+    [boolInt(profileCompleted(next)), userId]
+  );
 
   return getUserById(userId);
 };
 
-const getPublicOverview = () => {
-  const mentorCount = db
-    .prepare("SELECT COUNT(*) AS count FROM discovery_cards WHERE persona = 'teacher'")
-    .get().count;
-  const learnerCount = db
-    .prepare("SELECT COUNT(*) AS count FROM discovery_cards WHERE persona = 'learner'")
-    .get().count;
-  const featuredCards = db
-    .prepare(
+const getPublicOverview = async () => {
+  await init();
+  const mentorCount = rowCount(
+    await getRow(
+      "SELECT COUNT(*) AS count FROM discovery_cards WHERE persona = 'teacher'"
+    )
+  );
+  const learnerCount = rowCount(
+    await getRow(
+      "SELECT COUNT(*) AS count FROM discovery_cards WHERE persona = 'learner'"
+    )
+  );
+  const featuredCards = (
+    await getAll(
       `SELECT id, name, persona, title, skill, category, country, rating, bio, next_session_slots,
               0 AS connected, 0 AS favorited
        FROM discovery_cards
        ORDER BY rating DESC
        LIMIT 4`
     )
-    .all()
-    .map(rowToCard);
-  const featuredEvents = db
-    .prepare(
-      `SELECT id, title, description, base_participants AS participants, 0 AS joined
-       FROM events
-       ORDER BY base_participants DESC
-       LIMIT 3`
-    )
-    .all();
+  ).map(rowToCard);
+  const featuredEvents = await getAll(
+    `SELECT id, title, description, base_participants AS participants, 0 AS joined
+     FROM events
+     ORDER BY base_participants DESC
+     LIMIT 3`
+  );
 
   return {
     totalMembers:
-      db.prepare('SELECT COUNT(*) AS count FROM users').get().count +
-      db.prepare('SELECT COUNT(*) AS count FROM discovery_cards').get().count,
+      rowCount(await getRow('SELECT COUNT(*) AS count FROM users')) +
+      rowCount(await getRow('SELECT COUNT(*) AS count FROM discovery_cards')),
     mentorCount,
     learnerCount,
-    sessionCount: db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
-    categories: db.prepare('SELECT name FROM categories ORDER BY name').all().map((row) => row.name),
+    sessionCount: rowCount(await getRow('SELECT COUNT(*) AS count FROM sessions')),
+    categories: (await getAll('SELECT name FROM categories ORDER BY name')).map(
+      (row) => row.name
+    ),
     featuredCards,
     featuredEvents,
   };
 };
 
-const getCategories = () =>
-  db.prepare('SELECT name FROM categories ORDER BY name').all().map((row) => row.name);
+const getCategories = async () =>
+  (await getAll('SELECT name FROM categories ORDER BY name')).map(
+    (row) => row.name
+  );
 
-const getDiscoveryCards = (userId, { q = '', category = 'All', persona = 'All' }) => {
+const getDiscoveryCards = async (
+  userId,
+  { q = '', category = 'All', persona = 'All' }
+) => {
+  await init();
   const query = String(q).toLowerCase().trim();
-  return db
-    .prepare(
+  return (
+    await getAll(
       `SELECT c.*,
               COALESCE(s.connected, 0) AS connected,
               COALESCE(s.favorited, 0) AS favorited
@@ -508,103 +538,107 @@ const getDiscoveryCards = (userId, { q = '', category = 'All', persona = 'All' }
        WHERE (? = '' OR lower(c.name) LIKE ? OR lower(c.skill) LIKE ? OR lower(c.title) LIKE ?)
          AND (? = 'All' OR c.category = ?)
          AND (? = 'All' OR c.persona = ?)
-       ORDER BY c.rating DESC, c.name ASC`
+       ORDER BY c.rating DESC, c.name ASC`,
+      [
+        userId,
+        query,
+        `%${query}%`,
+        `%${query}%`,
+        `%${query}%`,
+        category,
+        category,
+        persona,
+        persona,
+      ]
     )
-    .all(
-      userId,
-      query,
-      `%${query}%`,
-      `%${query}%`,
-      `%${query}%`,
-      category,
-      category,
-      persona,
-      persona
-    )
-    .map(rowToCard);
+  ).map(rowToCard);
 };
 
-const upsertCardState = (userId, cardId, next) => {
-  db.prepare(
+const upsertCardState = async (userId, cardId, next) => {
+  await execute(
     `INSERT INTO user_card_state (user_id, card_id, connected, favorited)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(user_id, card_id)
-     DO UPDATE SET connected = excluded.connected, favorited = excluded.favorited`
-  ).run(userId, cardId, boolInt(next.connected), boolInt(next.favorited));
+     DO UPDATE SET connected = excluded.connected, favorited = excluded.favorited`,
+    [userId, cardId, boolInt(next.connected), boolInt(next.favorited)]
+  );
 };
 
-const getCardForUser = (userId, cardId) =>
-  db
-    .prepare(
-      `SELECT c.*,
-              COALESCE(s.connected, 0) AS connected,
-              COALESCE(s.favorited, 0) AS favorited
-       FROM discovery_cards c
-       LEFT JOIN user_card_state s
-         ON s.card_id = c.id AND s.user_id = ?
-       WHERE c.id = ?`
-    )
-    .get(userId, cardId);
+const getCardForUser = async (userId, cardId) =>
+  getRow(
+    `SELECT c.*,
+            COALESCE(s.connected, 0) AS connected,
+            COALESCE(s.favorited, 0) AS favorited
+     FROM discovery_cards c
+     LEFT JOIN user_card_state s
+       ON s.card_id = c.id AND s.user_id = ?
+     WHERE c.id = ?`,
+    [userId, cardId]
+  );
 
-const incrementUnreadMessages = (userId, amount = 1) => {
-  db.prepare(
-    'UPDATE messages SET unread_count = unread_count + ? WHERE user_id = ?'
-  ).run(amount, userId);
+const incrementUnreadMessages = async (userId, amount = 1) => {
+  await execute(
+    'UPDATE messages SET unread_count = unread_count + ? WHERE user_id = ?',
+    [amount, userId]
+  );
 };
 
-const toggleConnect = (userId, cardId) => {
-  const current = getCardForUser(userId, cardId);
+const toggleConnect = async (userId, cardId) => {
+  await init();
+  const current = await getCardForUser(userId, cardId);
   if (!current) {
     return null;
   }
   const nextConnected = !Boolean(current.connected);
-  upsertCardState(userId, cardId, {
+  await upsertCardState(userId, cardId, {
     connected: nextConnected,
     favorited: Boolean(current.favorited),
   });
   if (nextConnected) {
-    incrementUnreadMessages(userId, 1);
-    pushNotification(
+    await incrementUnreadMessages(userId, 1);
+    await pushNotification(
       userId,
       'New connection',
       `You connected with ${current.name} for ${current.skill}.`
     );
   }
-  return rowToCard(getCardForUser(userId, cardId));
+  return rowToCard(await getCardForUser(userId, cardId));
 };
 
-const toggleFavorite = (userId, cardId) => {
-  const current = getCardForUser(userId, cardId);
+const toggleFavorite = async (userId, cardId) => {
+  await init();
+  const current = await getCardForUser(userId, cardId);
   if (!current) {
     return null;
   }
   const nextFavorited = !Boolean(current.favorited);
-  upsertCardState(userId, cardId, {
+  await upsertCardState(userId, cardId, {
     connected: Boolean(current.connected),
     favorited: nextFavorited,
   });
   if (nextFavorited) {
-    pushNotification(
+    await pushNotification(
       userId,
       'Saved profile',
       `${current.name} was added to your favorites list.`
     );
   }
-  return rowToCard(getCardForUser(userId, cardId));
+  return rowToCard(await getCardForUser(userId, cardId));
 };
 
-const getSessions = (userId) =>
-  db
-    .prepare(
+const getSessions = async (userId) =>
+  (
+    await getAll(
       `SELECT * FROM sessions
        WHERE user_id = ?
-       ORDER BY datetime(created_at) DESC`
+       ORDER BY datetime(created_at) DESC`,
+      [userId]
     )
-    .all(userId)
-    .map(rowToSession);
+  ).map(rowToSession);
 
-const bookSession = (userId, cardId, time) => {
-  const card = db.prepare('SELECT * FROM discovery_cards WHERE id = ?').get(cardId);
+const bookSession = async (userId, cardId, time) => {
+  await init();
+  const card = await getRow('SELECT * FROM discovery_cards WHERE id = ?', [cardId]);
   if (!card) {
     return null;
   }
@@ -612,88 +646,109 @@ const bookSession = (userId, cardId, time) => {
   const createdAt = nowIso();
   const calendarUrl = `/api/sessions/${id}/calendar`;
 
-  db.prepare(
+  await execute(
     `INSERT INTO sessions (
       id, user_id, card_id, with_name, skill, time, status, created_at, calendar_url
-    ) VALUES (?, ?, ?, ?, ?, ?, 'upcoming', ?, ?)`
-  ).run(id, userId, card.id, card.name, card.skill, time, createdAt, calendarUrl);
+    ) VALUES (?, ?, ?, ?, ?, ?, 'upcoming', ?, ?)`,
+    [id, userId, card.id, card.name, card.skill, time, createdAt, calendarUrl]
+  );
 
-  db.prepare(
+  await execute(
     `UPDATE learning_plans
      SET first_session_booked = 1
-     WHERE user_id = ?`
-  ).run(userId);
+     WHERE user_id = ?`,
+    [userId]
+  );
 
-  incrementUnreadMessages(userId, 1);
-  pushNotification(userId, 'Booking confirmed', `${card.name} session is booked for ${time}.`);
-  return rowToSession(db.prepare('SELECT * FROM sessions WHERE id = ?').get(id));
+  await incrementUnreadMessages(userId, 1);
+  await pushNotification(
+    userId,
+    'Booking confirmed',
+    `${card.name} session is booked for ${time}.`
+  );
+  return rowToSession(await getRow('SELECT * FROM sessions WHERE id = ?', [id]));
 };
 
-const updateSessionStatus = (userId, sessionId, status) => {
-  const session = db
-    .prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId);
+const updateSessionStatus = async (userId, sessionId, status) => {
+  await init();
+  const session = await getRow(
+    'SELECT * FROM sessions WHERE id = ? AND user_id = ?',
+    [sessionId, userId]
+  );
   if (!session) {
     return null;
   }
-  db.prepare(
-    'UPDATE sessions SET status = ? WHERE id = ? AND user_id = ?'
-  ).run(status, sessionId, userId);
-  pushNotification(
+  await execute('UPDATE sessions SET status = ? WHERE id = ? AND user_id = ?', [
+    status,
+    sessionId,
+    userId,
+  ]);
+  await pushNotification(
     userId,
     'Session status updated',
     `${session.skill} with ${session.with_name} is now ${status}.`
   );
   return rowToSession(
-    db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId)
+    await getRow('SELECT * FROM sessions WHERE id = ? AND user_id = ?', [
+      sessionId,
+      userId,
+    ])
   );
 };
 
-const getSessionById = (userId, sessionId) =>
-  db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(sessionId, userId);
+const getSessionById = async (userId, sessionId) =>
+  getRow('SELECT * FROM sessions WHERE id = ? AND user_id = ?', [
+    sessionId,
+    userId,
+  ]);
 
-const getEvents = (userId) =>
-  db
-    .prepare(
+const getEvents = async (userId) =>
+  (
+    await getAll(
       `SELECT e.id, e.title, e.description,
               e.base_participants + COUNT(ues.user_id) AS participants,
               MAX(CASE WHEN ues.user_id = ? THEN 1 ELSE 0 END) AS joined
        FROM events e
        LEFT JOIN user_event_state ues ON ues.event_id = e.id
        GROUP BY e.id
-       ORDER BY participants DESC, e.title ASC`
+       ORDER BY participants DESC, e.title ASC`,
+      [userId]
     )
-    .all(userId)
-    .map(rowToEvent);
+  ).map(rowToEvent);
 
-const joinEvent = (userId, eventId) => {
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+const joinEvent = async (userId, eventId) => {
+  await init();
+  const event = await getRow('SELECT * FROM events WHERE id = ?', [eventId]);
   if (!event) {
     return null;
   }
-  const existing = db
-    .prepare('SELECT 1 FROM user_event_state WHERE user_id = ? AND event_id = ?')
-    .get(userId, eventId);
+  const existing = await getRow(
+    'SELECT 1 AS found FROM user_event_state WHERE user_id = ? AND event_id = ?',
+    [userId, eventId]
+  );
   if (!existing) {
-    db.prepare(
-      'INSERT INTO user_event_state (user_id, event_id, joined_at) VALUES (?, ?, ?)'
-    ).run(userId, eventId, nowIso());
-    db.prepare(
-      'UPDATE learning_plans SET challenge_joined = 1 WHERE user_id = ?'
-    ).run(userId);
-    incrementUnreadMessages(userId, 1);
-    pushNotification(userId, 'Event joined', `You joined "${event.title}".`);
+    await execute(
+      'INSERT INTO user_event_state (user_id, event_id, joined_at) VALUES (?, ?, ?)',
+      [userId, eventId, nowIso()]
+    );
+    await execute(
+      'UPDATE learning_plans SET challenge_joined = 1 WHERE user_id = ?',
+      [userId]
+    );
+    await incrementUnreadMessages(userId, 1);
+    await pushNotification(userId, 'Event joined', `You joined "${event.title}".`);
   }
-  return getEvents(userId).find((item) => item.id === eventId) || null;
+  return (await getEvents(userId)).find((item) => item.id === eventId) || null;
 };
 
-const getLearningPlan = (userId) =>
+const getLearningPlan = async (userId) =>
   rowToLearningPlan(
-    db.prepare('SELECT * FROM learning_plans WHERE user_id = ?').get(userId)
+    await getRow('SELECT * FROM learning_plans WHERE user_id = ?', [userId])
   );
 
-const updateLearningPlan = (userId, updates) => {
-  const current = getLearningPlan(userId);
+const updateLearningPlan = async (userId, updates) => {
+  await init();
+  const current = await getLearningPlan(userId);
   if (!current) {
     return null;
   }
@@ -704,76 +759,90 @@ const updateLearningPlan = (userId, updates) => {
     skillsTarget: updates.skillsTarget ?? current.skillsTarget,
     skillsCompleted: updates.skillsCompleted ?? current.skillsCompleted,
   };
-  db.prepare(
+  await execute(
     `UPDATE learning_plans
      SET profile_completed = ?, first_session_booked = ?, challenge_joined = ?, skills_target = ?, skills_completed = ?
-     WHERE user_id = ?`
-  ).run(
-    boolInt(next.profileCompleted),
-    boolInt(next.firstSessionBooked),
-    boolInt(next.challengeJoined),
-    next.skillsTarget,
-    next.skillsCompleted,
-    userId
+     WHERE user_id = ?`,
+    [
+      boolInt(next.profileCompleted),
+      boolInt(next.firstSessionBooked),
+      boolInt(next.challengeJoined),
+      next.skillsTarget,
+      next.skillsCompleted,
+      userId,
+    ]
   );
   return getLearningPlan(userId);
 };
 
-const getMessages = (userId) =>
-  db.prepare('SELECT unread_count FROM messages WHERE user_id = ?').get(userId) || {
+const getMessages = async (userId) =>
+  (await getRow('SELECT unread_count FROM messages WHERE user_id = ?', [userId])) || {
     unread_count: 0,
   };
 
-const markMessagesRead = (userId) => {
-  db.prepare('UPDATE messages SET unread_count = 0 WHERE user_id = ?').run(userId);
-  db.prepare('UPDATE message_threads SET unread = 0 WHERE user_id = ?').run(userId);
+const markMessagesRead = async (userId) => {
+  await init();
+  await execute('UPDATE messages SET unread_count = 0 WHERE user_id = ?', [userId]);
+  await execute('UPDATE message_threads SET unread = 0 WHERE user_id = ?', [userId]);
   return { unreadCount: 0 };
 };
 
-const getNotifications = (userId) =>
-  db
-    .prepare(
+const getNotifications = async (userId) =>
+  (
+    await getAll(
       `SELECT * FROM notifications
        WHERE user_id = ?
-       ORDER BY datetime(created_at) DESC`
+       ORDER BY datetime(created_at) DESC`,
+      [userId]
     )
-    .all(userId)
-    .map(rowToNotification);
+  ).map(rowToNotification);
 
-const markNotificationsRead = (userId) => {
-  db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(userId);
+const markNotificationsRead = async (userId) => {
+  await init();
+  await execute('UPDATE notifications SET read = 1 WHERE user_id = ?', [userId]);
   return getNotifications(userId);
 };
 
-const getMessageThreads = (userId) =>
-  db
-    .prepare(
+const getMessageThreads = async (userId) =>
+  (
+    await getAll(
       `SELECT * FROM message_threads
        WHERE user_id = ?
-       ORDER BY datetime(last_at) DESC`
+       ORDER BY datetime(last_at) DESC`,
+      [userId]
     )
-    .all(userId)
-    .map(rowToThread);
+  ).map(rowToThread);
 
-const replyThread = (userId, threadId, message) => {
-  const thread = db
-    .prepare('SELECT * FROM message_threads WHERE id = ? AND user_id = ?')
-    .get(threadId, userId);
+const replyThread = async (userId, threadId, message) => {
+  await init();
+  const thread = await getRow(
+    'SELECT * FROM message_threads WHERE id = ? AND user_id = ?',
+    [threadId, userId]
+  );
   if (!thread) {
     return null;
   }
-  db.prepare(
+  await execute(
     `UPDATE message_threads
      SET last_message = ?, last_at = ?, unread = 0
-     WHERE id = ? AND user_id = ?`
-  ).run(String(message).trim(), nowIso(), threadId, userId);
-  pushNotification(userId, 'Message sent', `Your reply was sent to ${thread.participant}.`);
+     WHERE id = ? AND user_id = ?`,
+    [String(message).trim(), nowIso(), threadId, userId]
+  );
+  await pushNotification(
+    userId,
+    'Message sent',
+    `Your reply was sent to ${thread.participant}.`
+  );
   return rowToThread(
-    db.prepare('SELECT * FROM message_threads WHERE id = ? AND user_id = ?').get(threadId, userId)
+    await getRow('SELECT * FROM message_threads WHERE id = ? AND user_id = ?', [
+      threadId,
+      userId,
+    ])
   );
 };
 
 module.exports = {
+  init,
   createUser,
   getUserByEmail,
   getUserById,

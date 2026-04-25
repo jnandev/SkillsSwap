@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
+    "postinstall": "npm install --prefix backend",
     "start": "expo start",
     "start:dev-client": "expo start --dev-client",
     "android": "expo start --android",
