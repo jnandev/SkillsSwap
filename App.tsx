@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Animated,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -37,8 +38,13 @@ const local = (globalThis as { localStorage?: Storage }).localStorage;
 const readStoredToken = () => local?.getItem(TOKEN_KEY) ?? '';
 const storeToken = (token: string) => local?.setItem(TOKEN_KEY, token);
 const clearToken = () => local?.removeItem(TOKEN_KEY);
+const configuredApiBase =
+  process.env.EXPO_PUBLIC_API_BASE || '';
+const isWeb = Platform.OS === 'web';
 const calendarBaseUrl =
-  typeof window !== 'undefined' ? window.location.origin : 'http://localhost:4000';
+  isWeb
+    ? window.location.origin
+    : configuredApiBase.replace(/\/api$/, '') || 'http://localhost:4000';
 
 const completeProfile = (user: User | null) =>
   Boolean(

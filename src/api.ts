@@ -12,10 +12,14 @@ import type {
 } from './types';
 
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
-const configuredApiBase = Constants.expoConfig?.extra?.apiBase;
-const API_BASE =
-  typeof window !== 'undefined' ? '/api' : configuredApiBase || 'http://localhost:4000/api';
+const configuredApiBase =
+  process.env.EXPO_PUBLIC_API_BASE ||
+  Constants.expoConfig?.extra?.apiBase ||
+  '';
+const isWeb = Platform.OS === 'web';
+const API_BASE = isWeb ? '/api' : configuredApiBase || 'http://localhost:4000/api';
 let authToken = '';
 
 export const setAuthToken = (token: string) => {
