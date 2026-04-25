@@ -18,7 +18,7 @@ SkillSwap is a premium-style mentoring and peer-learning app built with Expo, Re
 
 - Frontend: Expo, React Native, TypeScript
 - Backend: Node.js, Express
-- Persistence: libSQL/Turso-ready database layer with local file fallback
+- Persistence: MongoDB-ready backend with libSQL/Turso fallback
 - Hosting: Vercel
 - Native build tooling: EAS Build
 
@@ -57,8 +57,10 @@ Backend URL:
 
 Environment:
 - Copy [.env.example](/Users/dev/Desktop/SkillsSwap/.env.example) to `.env`
+- If `MONGODB_URI` is set, the backend uses MongoDB
 - For local-only fallback, you can omit Turso credentials and the backend will use a local file database
 - For hosted persistence, set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`
+- For MongoDB Atlas, set `MONGODB_URI` and optionally `MONGODB_DB_NAME`
 
 Expo shortcuts:
 - `a` opens Android
@@ -126,6 +128,23 @@ Then open the installed SkillSwap development build on the Android phone.
 
 - Email: `demo@skillsswap.app`
 - Password: `demo123`
+
+## MongoDB
+
+This project now supports MongoDB as the primary backend store.
+
+Required environment variables:
+- `MONGODB_URI`
+- `MONGODB_DB_NAME` (optional, defaults to `skillsswap`)
+
+Recommended flow:
+- Create a MongoDB Atlas cluster
+- Create a database user
+- Add your IP to Atlas network access
+- Copy the driver connection string into `.env` as `MONGODB_URI`
+- Start the backend with `npm run backend`
+
+The backend seeds the demo data automatically into MongoDB the first time it starts against an empty database.
 
 ## Scripts
 
